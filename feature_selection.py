@@ -95,9 +95,12 @@ def likelihood_best(X, y):
     I.e. P(feature | class)
 
     Currently only handles the two class case.. For other cases, will return an array of zeros
-    :param X:
-    :param y:
-    :return:
+    :param X: {array-like, sparse matrix} of shape (n_samples, n_features)
+        Sample vectors.
+    :param y: array-like of shape (n_samples,)
+        Target vector (class labels).
+    :return: array, shape = (n_features,)
+        Absolute likelihood difference vector
     """
     global pipe
 
@@ -134,7 +137,7 @@ pipe = Pipeline([('count', CountVectorizer()),
                  # ('tf_idf', TfidfTransformer(norm=None)),
                  # ('tf_idf_debug', Debug()),
                  # ('chi2', SelectKBest(chi2, k=k_best)),
-                 ('chi2', SelectKBest(likelihood_best, k=k_best)),
+                 ('best_likelihoods', SelectKBest(likelihood_best, k=k_best)),
                  ('kbest_debug', Debug()),
                  ('clf', MultinomialNB(alpha=0))])
 
@@ -147,7 +150,7 @@ count_vec_df = sparse_to_df(pipe['countvectorizer_debug'].fit_result, pipe['coun
 print(count_vec_df)
 
 print(f"K={k_best} best features accuracy")
-k_best_feat = [feat_names[i] for i in pipe['chi2'].get_support(indices=True)]
+k_best_feat = [feat_names[i] for i in pipe['best_likelihoods'].get_support(indices=True)]
 print(f"k_best_feat: {k_best_feat}")
 k_best_df = sparse_to_df(pipe['kbest_debug'].fit_result, k_best_feat)
 k_best_df['Suitable actuals'] = y
