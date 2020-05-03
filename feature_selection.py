@@ -14,7 +14,7 @@ import pandas as pd
 
 class Debug(TransformerMixin, BaseEstimator):
     """
-    This class is use to debug pipelines, it saves the current value of X from both the previous pipeline step
+    This class is used to debug pipelines, it saves the current value of X from both the previous pipeline step
     that could have been a fit or a transform
     """
     def __init__(self):
