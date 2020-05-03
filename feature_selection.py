@@ -13,8 +13,11 @@ import pandas as pd
 
 
 class Debug(TransformerMixin, BaseEstimator):
-    def __init__(self, demo_param='demo'):
-        self.demo_param = demo_param
+    """
+    This class is use to debug pipelines, it saves the current value of X from both the previous pipeline step
+    that could have been a fit or a transform
+    """
+    def __init__(self):
         self.fit_result = []
         self.transform_result = []
 
