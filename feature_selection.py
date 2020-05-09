@@ -59,26 +59,39 @@ def convert_log_prob_to_df_prob(log_prob, class_names):
 
 def compute_relative_freq_df(df, feat_names, class_names, actuals_class_name):
     # For each feature, calculate it's p(feature | outcome)
+    # puts each separate combination of feature & outcome in a separate row
+    debug = False
     rows = []
 
+    print(df)
     for f in feat_names:
-        # Each row is the feature name followed by the value_counts of the 1's
-        vcs = [f]
         for c in class_names:
+            # Each row is the feature name, class followed by the value_counts of the 1's
+            vcs = [f, c]
+
             vc = df[df[actuals_class_name] == c][f].value_counts()
-            # Get the 1's
+             # Get the 1's
             vc = vc.get(1) if vc.get(1) else 0
             vcs.append(vc)
-        rows.append(vcs)
+            if debug:
+                print(f"f: {f} c: {c} vc: {vc}")
+            rows.append(vcs)
 
-    cols = ['features']
-    cols.extend(class_names)
+    cols = ['features', 'class_value', 'probability']
+    # cols.extend(class_names)
 
     likelihoods_df = pd.DataFrame(rows, columns=cols)
-    for c in class_names:
-        likelihoods_df[c] = likelihoods_df[c] / likelihoods_df[c].sum()
-    return likelihoods_df
 
+    for c in class_names:
+        prob_sum = likelihoods_df.loc[likelihoods_df['class_value'] == c, 'probability'].sum()
+        likelihoods_df.loc[likelihoods_df['class_value'] == c, ['probability']] = \
+            likelihoods_df.loc[likelihoods_df['class_value'] == c, ['probability']] / prob_sum
+        #TODO remove this line
+        prob_sum = likelihoods_df.loc[likelihoods_df['class_value'] == c, 'probability'].sum()
+
+    print(likelihoods_df)
+
+    return likelihoods_df
 
 weather = [
     ['Sunny', 'Hot', 'Normal', 'Calm', 'Y'],
@@ -118,10 +131,14 @@ def likelihood_best(X, y):
                                               cls_names, 'Actuals')
     # Two class case
     if len(cls_names) == 2:
-        likelihoods_df['diff'] = (likelihoods_df[cls_names[0]] -
-                                  likelihoods_df[cls_names[1]]).abs()
-        print(f"likelihoods_df:\n {likelihoods_df}")
-        a1 = np.array(likelihoods_df['diff'])
+        a1 = []
+        for f in feat_names:
+            diff = abs(likelihoods_df[likelihoods_df['features'] == f].iloc[0]['probability'] - \
+                    likelihoods_df[likelihoods_df['features'] == f].iloc[1]['probability'] )
+
+            a1.append(diff)
+        a1 = np.array(a1)
+    print(f"a1: {a1}")
     return a1
 
 
