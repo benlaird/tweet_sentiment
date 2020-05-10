@@ -11,6 +11,8 @@ from sklearn.pipeline import Pipeline
 import numpy as np
 import pandas as pd
 
+from mutual_info import calc_mutual_information
+
 
 class Debug(TransformerMixin, BaseEstimator):
     """
@@ -49,21 +51,23 @@ def convert_log_prob_to_df_prob(log_prob, class_names):
     prob_arr = np.transpose(prob_arr)
 
     probs = pd.DataFrame(prob_arr, columns=class_names)
+
     # Unlog by taking exponents
     probs = probs.apply(np.exp)
     # Add the feature names as the first column
     probs['feature'] = k_best_feat
-    probs.set_index('feature', inplace=True)
+
+    # Unpivot the class names from the columns to the rows.. Note this doesn't work if the index is already set
+    probs = pd.melt(probs, id_vars=['feature'], value_vars=class_names, var_name='y', value_name='prob')
     return probs
 
 
-def compute_relative_freq_df(df, feat_names, class_names, actuals_class_name):
+def compute_relative_freq_df(df, feat_names, class_names, actuals_class_name, compute_relative_prob=True):
     # For each feature, calculate it's p(feature | outcome)
     # puts each separate combination of feature & outcome in a separate row
     debug = False
     rows = []
 
-    print(df)
     for f in feat_names:
         for c in class_names:
             # Each row is the feature name, class followed by the value_counts of the 1's
@@ -77,19 +81,16 @@ def compute_relative_freq_df(df, feat_names, class_names, actuals_class_name):
                 print(f"f: {f} c: {c} vc: {vc}")
             rows.append(vcs)
 
-    cols = ['features', 'class_value', 'probability']
+    cols = ['x', actuals_class_name, 'prob']
     # cols.extend(class_names)
 
     likelihoods_df = pd.DataFrame(rows, columns=cols)
 
-    for c in class_names:
-        prob_sum = likelihoods_df.loc[likelihoods_df['class_value'] == c, 'probability'].sum()
-        likelihoods_df.loc[likelihoods_df['class_value'] == c, ['probability']] = \
-            likelihoods_df.loc[likelihoods_df['class_value'] == c, ['probability']] / prob_sum
-        #TODO remove this line
-        prob_sum = likelihoods_df.loc[likelihoods_df['class_value'] == c, 'probability'].sum()
-
-    print(likelihoods_df)
+    if compute_relative_prob:
+        for c in class_names:
+            prob_sum = likelihoods_df.loc[likelihoods_df[actuals_class_name] == c, 'probability'].sum()
+            likelihoods_df.loc[likelihoods_df[actuals_class_name] == c, ['probability']] = \
+                likelihoods_df.loc[likelihoods_df[actuals_class_name] == c, ['probability']] / prob_sum
 
     return likelihoods_df
 
@@ -107,7 +108,7 @@ weather = [
 
 def likelihood_best(X, y):
     """
-    Custom function to be used by SelectKBest that computes the likelihood dataframe for each feature, class combination
+    Custom function to be used by SelectKBest that computes the likelihood for each feature, class combination
     I.e. P(feature | class)
 
     Currently only handles the two class case.. For other cases, will return an array of zeros
@@ -141,6 +142,45 @@ def likelihood_best(X, y):
     print(f"a1: {a1}")
     return a1
 
+def mutual_info_best(X, y):
+    """
+    Custom function to be used by SelectKBest that computes the mutual information for each feature, class combination
+    I.e. P(feature | class)
+
+    Currently only handles the two class case.. For other cases, will return an array of zeros
+    :param X: {array-like, sparse matrix} of shape (n_samples, n_features)
+        Sample vectors.
+    :param y: array-like of shape (n_samples,)
+        Target vector (class labels).
+    :return: array, shape = (n_features,)
+        Absolute likelihood difference vector
+    """
+    global pipe
+
+    feat_names = pipe['count'].get_feature_names()
+    # Initialize return array to all zeroes
+    a1 = np.array([0] * len(feat_names))
+
+    count_vec_df = sparse_to_df(X, feat_names)
+    count_vec_df['y'] = y
+    cls_names = np.unique(y)
+
+    cls_counts = {}
+    gs = count_vec_df.groupby('y').groups
+    for y in gs:
+        cls_counts[y] = len(gs[y])
+
+    print(count_vec_df)
+
+    likelihoods_df = compute_relative_freq_df(count_vec_df, feat_names,
+                                              cls_names, 'y', compute_relative_prob=False)
+
+    mi = calc_mutual_information(likelihoods_df, feat_names, cls_counts, use_cond_entropy=True)
+    print(f"feature names: {feat_names}")
+    print(f"mutual info: {mi}")
+    mi = np.array(mi)
+    return mi
+
 
 # Create the pandas DataFrame
 df = pd.DataFrame(weather, columns=['Weather', 'Temperature', 'Humidity', 'Wind', 'Suitable'])
@@ -157,7 +197,9 @@ pipe = Pipeline([('count', CountVectorizer()),
                  # ('tf_idf', TfidfTransformer(norm=None)),
                  # ('tf_idf_debug', Debug()),
                  # ('chi2', SelectKBest(chi2, k=k_best)),
-                 ('best_likelihoods', SelectKBest(likelihood_best, k=k_best)),
+                 # ('best_likelihoods', SelectKBest(likelihood_best, k=k_best)),
+                 ('best_likelihoods', SelectKBest(mutual_info_best, k=k_best)),
+
                  ('kbest_debug', Debug()),
                  ('clf', MultinomialNB(alpha=0))])
 
@@ -189,7 +231,7 @@ print(k_best_df)
 probs = convert_log_prob_to_df_prob(pipe['clf'].feature_log_prob_, pipe['clf'].classes_)
 # Round the columns to account for alpha
 tmp = probs.select_dtypes(include=[np.number])
-probs.loc[:, tmp.columns] = np.round(tmp, 2)
+probs.loc[:, tmp.columns] = np.round(tmp, 4)
 print(probs)
 
 
