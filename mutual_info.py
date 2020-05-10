@@ -1,5 +1,4 @@
 from math import log2
-
 import numpy as np
 import pandas as pd
 
@@ -77,7 +76,7 @@ def calc_mutual_information_using_cond_entropy(df, px, py):
     return mi
 
 
-def calc_mutual_information(df, use_cond_entropy=True):
+def calc_mutual_information_for_word(df, use_cond_entropy=True):
     debug = False
 
     # Calc marginal probabilities for x
@@ -108,4 +107,51 @@ def calc_mutual_information(df, use_cond_entropy=True):
         mi = calc_mutual_information_using_joint_entropy(df, hx, hy)
 
     return mi
+
+
+def calc_mutual_information(full_df, feat_names, class_count_residuals, use_cond_entropy=True):
+    """
+    For each feature (x) add the corresponding absence of the feature probabilites
+    Resulting data frame should be 2 * # of class labels rows in length
+
+    :param class_count_residuals: a dictionary for each class label showing the class counts e.g.
+                                 {'art' : 57, 'music' : 45 }
+    :param df:
+
+    :param use_cond_entropy:
+    :return: an array of mutual information on value per feature
+    """
+
+    gs = full_df.groupby('y').groups
+    num_class_labels = len(gs.keys())
+    mut_infos = []
+
+    # Order has to be same as the order of the feat_names passed to this function
+    for feature in feat_names:
+        # TEMP remove this
+        if feature.startswith('not '):
+            continue
+        new_arr = []
+        word_df = full_df[full_df['x'] == feature].copy()
+        word_df.reset_index(inplace = True, drop = True)
+        num_rows = word_df.shape[0]
+
+        # The case where not all combinations are already specified
+        if num_rows != num_class_labels * 2:
+            for index, row in word_df.iterrows():
+                # Append row with the negative feature & probability
+                new_arr.append(['not ' + row['x'], row['y'], class_count_residuals[row['y']] - row['prob']])
+
+        new_df = pd.DataFrame(new_arr, columns=['x', 'y', 'prob'])
+        word_df = pd.concat([word_df, new_df])
+        word_df.reset_index(inplace = True, drop = True)
+
+        num_rows = word_df.shape[0]
+        if num_rows != num_class_labels * 2:
+            raise("num_rows is not equal to num_class_labels * 2")
+
+        word_df['prob'] = word_df['prob'] / word_df['prob'].sum()
+        mi = calc_mutual_information_for_word(word_df, use_cond_entropy=True)
+        mut_infos.append(mi)
+    return mut_infos
 
