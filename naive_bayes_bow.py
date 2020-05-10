@@ -8,6 +8,7 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer, T
 from sklearn.naive_bayes import GaussianNB
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from sklearn.pipeline import Pipeline
 
 from yellowbrick.classifier import classification_report as yb_class_report, ClassificationReport
 from yellowbrick.classifier import ConfusionMatrix
@@ -19,9 +20,12 @@ nlp = spacy.load("en_core_web_sm")
 
 
 class Debug(TransformerMixin, BaseEstimator):
+    """
+    This class is used to debug pipelines, it saves the current value of X from both the previous pipeline step
+    that could have been a fit or a transform
+    """
 
-    def __init__(self, demo_param='demo'):
-        self.demo_param = demo_param
+    def __init__(self):
         self.fit_result = []
         self.transform_result = []
 
@@ -34,15 +38,6 @@ class Debug(TransformerMixin, BaseEstimator):
         # No op transform
         self.transform_result = X
         return X
-
-
-
-pipe = Pipeline([
-    ("tf_idf", TfidfVectorizer()),
-    ("debug", Debug()),
-    ("nmf", NMF())
-])
-
 
 
 def top_n_features(feature_names, response, top_n=3):
@@ -128,7 +123,7 @@ def custom_tokenizer(sentence):
 
 def model_naive_bayes():
     use_counts = False
-    debug = True
+    debug = False
 
     # Read all tweet text into docs
     # Docs is an array of text strings
@@ -144,19 +139,28 @@ def model_naive_bayes():
     X_train, X_test, y_train, y_test, idx_train, idx_test = train_test_split(X, y, indices, random_state=1,
                                                                              test_size=0.25)
 
-    vectorizer = TfidfVectorizer(analyzer='word',
-                                 strip_accents='unicode',
-                                 stop_words='english',
-                                 lowercase=True,
-                                 tokenizer=custom_tokenizer,
-                                 ngram_range=(1, 2)
-                                 # token_pattern=r'\b[a-zA-Z]{3,}\b',
-                                 # max_df=0.6,
-                                 # min_df=0.0
-                                 )
-    dtm_tfidf_train = vectorizer.fit_transform(X_train)
+    pipe = Pipeline([
+        ("tf_idf", TfidfVectorizer(analyzer='word',
+                                   strip_accents='unicode',
+                                   stop_words='english',
+                                   lowercase=True,
+                                   tokenizer=custom_tokenizer,
+                                   ngram_range=(1, 2)
+                                   # token_pattern=r'\b[a-zA-Z]{3,}\b',
+                                   # max_df=0.6,
+                                   # min_df=0.0
+                                   )),
+        ("tf_idf_debug", Debug()),
+        ('clf', MultinomialNB())
+    ])
 
+    result = pipe.fit(X_train, y_train)
+    y_preds = pipe.predict(X)
+
+    vectorizer = pipe['tf_idf']
     feature_names = np.array(vectorizer.get_feature_names())
+
+    dtm_tfidf_train = pipe['tf_idf_debug'].fit_result
 
     # Return the idx's of the positive sentiments
     positive_train = list(filter(lambda idx: sentiment_matches(idx, y, 'positive'), idx_train))
@@ -182,19 +186,23 @@ def model_naive_bayes():
                 top_n_features(feature_names, response, 5)
                 print("\n\n")
 
-    print(f"Train type: {type(dtm_tfidf_train)} Train shape: {dtm_tfidf_train.shape}")
-
-    dtm_tfidf_test = vectorizer.transform(X_test)
+    dtm_tfidf_train = pipe['tf_idf_debug'].fit_result
+    # Call just the transform on the test data - so we can visualize the fit later!
+    dtm_tfidf_test = pipe['tf_idf'].transform(X_test)
+    print(f"Train shape: {dtm_tfidf_train.shape}")
 
     if False:
         for response in dtm_tfidf_test:
             top_n_features(feature_names, response)
 
-    gnb = MultinomialNB()
-    gnb.fit(dtm_tfidf_train, y_train)
+    # gnb = MultinomialNB()
+    # gnb.fit(dtm_tfidf_train, y_train)
 
-    nb_train_preds = gnb.predict(dtm_tfidf_train)
-    nb_test_preds = gnb.predict(dtm_tfidf_test)
+    # nb_train_preds = gnb.predict(dtm_tfidf_train)
+    # nb_test_preds = gnb.predict(dtm_tfidf_test)
+
+    nb_train_preds = pipe.predict(X_train)
+    nb_test_preds = pipe.predict(X_test)
 
     nb_train_score = accuracy_score(y_train, nb_train_preds)
     nb_test_score = accuracy_score(y_test, nb_test_preds)
@@ -212,6 +220,8 @@ def model_naive_bayes():
 
     print("*** Top mean positive features ***")
     # top_mean_f = top_mean_feats(dtm_tfidf_train, feature_names)
+
+
     top_mean_f = top_mean_feats(dtm_tfidf_train, feature_names, grp_ids=positive_train_offset)
     print(top_mean_f)
 
@@ -221,11 +231,12 @@ def model_naive_bayes():
     print(top_mean_f)
 
     if True:
+        gnb = pipe['clf']
+
         visualizer = ClassificationReport(gnb)  # classes=classes, support=True)
         visualizer.fit(dtm_tfidf_train, y_train)
         visualizer.score(dtm_tfidf_test, y_test)  # Evaluate the model on the test data
         visualizer.show()  # Finalize and show the figure
-
 
 def main():
     model_naive_bayes()
