@@ -1,4 +1,6 @@
+import pickle
 import re
+import time
 
 import pandas as pd
 import numpy as np
@@ -39,6 +41,22 @@ class Debug(TransformerMixin, BaseEstimator):
         self.transform_result = X
         return X
 
+
+class ClockTime:
+    def __init__(self):
+        self.start_time = None
+        self.end_time = None
+        self.elapsed = None
+
+    def start(self, info_str=None):
+        if info_str:
+            print(info_str)
+        self.start_time = time.time()
+
+    def stop(self):
+        self.end_time = time.time()
+        self.elapsed = self.end_time - self.start_time
+        return self.elapsed
 
 def top_n_features(feature_names, response, top_n=3):
     sorted_nzs = np.argsort(response.data)[:-(top_n + 1):-1]
@@ -121,9 +139,9 @@ def custom_tokenizer(sentence):
     return ret
 
 
-def model_naive_bayes():
+def model_naive_bayes(save_vector_cache=False, read_vector_cache=False, debug=False):
     use_counts = False
-    debug = False
+    ct = ClockTime()
 
     # Read all tweet text into docs
     # Docs is an array of text strings
@@ -139,25 +157,39 @@ def model_naive_bayes():
     X_train, X_test, y_train, y_test, idx_train, idx_test = train_test_split(X, y, indices, random_state=1,
                                                                              test_size=0.25)
 
-    pipe = Pipeline([
-        ("tf_idf", TfidfVectorizer(analyzer='word',
-                                   strip_accents='unicode',
-                                   stop_words='english',
-                                   lowercase=True,
-                                   tokenizer=custom_tokenizer,
-                                   ngram_range=(1, 2)
-                                   # token_pattern=r'\b[a-zA-Z]{3,}\b',
-                                   # max_df=0.6,
-                                   # min_df=0.0
-                                   )),
-        ("tf_idf_debug", Debug()),
-        ('clf', MultinomialNB())
-    ])
+    if read_vector_cache:
+        with open('vectorizer.pickle', 'rb') as f:
+            # The protocol version used is detected automatically, so we do not
+            # have to specify it.
+            vectorizer = pickle.load(f)
+            vect_pipe_tupe = ("tf_idf", vectorizer)
+    else:
+        vect_pipe_tupe = ("tf_idf", TfidfVectorizer(analyzer='word',
+                               strip_accents='unicode',
+                               stop_words='english',
+                               lowercase=True,
+                               tokenizer=custom_tokenizer,
+                               ngram_range=(1, 2)
+                               # token_pattern=r'\b[a-zA-Z]{3,}\b',
+                               # max_df=0.6,
+                               # min_df=0.0
+                               ))
 
+    pipe = Pipeline([
+            vect_pipe_tupe,
+            ("tf_idf_debug", Debug()),
+            ('clf', MultinomialNB())])
+
+    ct.start("Fitting the training data...")
     result = pipe.fit(X_train, y_train)
-    y_preds = pipe.predict(X)
+    print(f"Fitted the training data in {ct.stop()} seconds")
 
     vectorizer = pipe['tf_idf']
+    if save_vector_cache:
+        with open('vectorizer.pickle', 'wb') as f:
+            # Pickle the 'data' dictionary using the highest protocol available.
+            pickle.dump(vectorizer, f, pickle.HIGHEST_PROTOCOL)
+
     feature_names = np.array(vectorizer.get_feature_names())
 
     dtm_tfidf_train = pipe['tf_idf_debug'].fit_result
@@ -187,22 +219,13 @@ def model_naive_bayes():
                 print("\n\n")
 
     dtm_tfidf_train = pipe['tf_idf_debug'].fit_result
-    # Call just the transform on the test data - so we can visualize the fit later!
-    dtm_tfidf_test = pipe['tf_idf'].transform(X_test)
+
     print(f"Train shape: {dtm_tfidf_train.shape}")
 
-    if False:
-        for response in dtm_tfidf_test:
-            top_n_features(feature_names, response)
-
-    # gnb = MultinomialNB()
-    # gnb.fit(dtm_tfidf_train, y_train)
-
-    # nb_train_preds = gnb.predict(dtm_tfidf_train)
-    # nb_test_preds = gnb.predict(dtm_tfidf_test)
-
+    ct.start("Predicting the training & test data...")
     nb_train_preds = pipe.predict(X_train)
     nb_test_preds = pipe.predict(X_test)
+    print(f"Did the train & test predictions in: {ct.stop()} seconds")
 
     nb_train_score = accuracy_score(y_train, nb_train_preds)
     nb_test_score = accuracy_score(y_test, nb_test_preds)
@@ -219,19 +242,19 @@ def model_naive_bayes():
     print(classification_report(y_test, nb_test_preds))
 
     print("*** Top mean positive features ***")
-    # top_mean_f = top_mean_feats(dtm_tfidf_train, feature_names)
-
-
     top_mean_f = top_mean_feats(dtm_tfidf_train, feature_names, grp_ids=positive_train_offset)
     print(top_mean_f)
 
     print("*** Top mean negative features ***")
-    # top_mean_f = top_mean_feats(dtm_tfidf_train, feature_names)
     top_mean_f = top_mean_feats(dtm_tfidf_train, feature_names, grp_ids=negative_train_offset)
     print(top_mean_f)
 
-    if True:
+    if False:
         gnb = pipe['clf']
+        # Call just the transform on the test data - so we can visualize the fit later!
+        dtm_tfidf_test = pipe['tf_idf'].transform(X_test)
+        # for response in dtm_tfidf_test:
+        #    top_n_features(feature_names, response)
 
         visualizer = ClassificationReport(gnb)  # classes=classes, support=True)
         visualizer.fit(dtm_tfidf_train, y_train)
@@ -239,7 +262,9 @@ def model_naive_bayes():
         visualizer.show()  # Finalize and show the figure
 
 def main():
-    model_naive_bayes()
+    # model_naive_bayes(save_vector_cache=True)
 
+    # model_naive_bayes(debug=True)
+    model_naive_bayes(read_vector_cache=True)
 
 main()
