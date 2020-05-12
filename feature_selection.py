@@ -13,6 +13,7 @@ import pandas as pd
 
 from mutual_info import calc_mutual_information
 
+from globals import Global
 
 class Debug(TransformerMixin, BaseEstimator):
     """
@@ -38,7 +39,7 @@ def sparse_to_df(sp_matrix, feat_names):
     return pd.DataFrame(sp_matrix.todense(), columns=feat_names)
 
 
-def convert_log_prob_to_df_prob(log_prob, class_names):
+def convert_log_prob_to_df_prob(log_prob, class_names, k_best_feat):
     """
     Converts the log probabilities returned by MultinomialNB to a data frame
 
@@ -62,7 +63,7 @@ def convert_log_prob_to_df_prob(log_prob, class_names):
     return probs
 
 
-def compute_relative_freq_df(df, feat_names, class_names, actuals_class_name, compute_relative_prob=True):
+def compute_relative_freq_df_old(df, feat_names, class_names, actuals_class_name, compute_relative_prob=True):
     # For each feature, calculate it's p(feature | outcome)
     # puts each separate combination of feature & outcome in a separate row
     debug = False
@@ -85,6 +86,36 @@ def compute_relative_freq_df(df, feat_names, class_names, actuals_class_name, co
     # cols.extend(class_names)
 
     likelihoods_df = pd.DataFrame(rows, columns=cols)
+
+    if compute_relative_prob:
+        for c in class_names:
+            prob_sum = likelihoods_df.loc[likelihoods_df[actuals_class_name] == c, 'probability'].sum()
+            likelihoods_df.loc[likelihoods_df[actuals_class_name] == c, ['probability']] = \
+                likelihoods_df.loc[likelihoods_df[actuals_class_name] == c, ['probability']] / prob_sum
+
+    return likelihoods_df
+
+
+def compute_relative_freq_df(df, feat_names, class_names, actuals_class_name, compute_relative_prob=True):
+    # For each feature, calculate it's p(feature | outcome)
+    # puts each separate combination of feature & outcome in a separate row
+    debug = False
+    rows = []
+
+    # Sum the document counts by class label
+    gs = df.groupby('y').sum()
+
+    # Transpose and rename the index col
+    gs2 = gs.transpose().rename_axis('feature', axis=1)
+
+    # melt seems to require there to be no index
+    gs2.reset_index(inplace=True)
+
+    # Make the distinct class names distinct rows
+    likelihoods_df = pd.melt(gs2, id_vars=['index'], value_vars=class_names, var_name='y')
+
+    cols = ['x', actuals_class_name, 'prob']
+    likelihoods_df.columns = cols
 
     if compute_relative_prob:
         for c in class_names:
@@ -119,14 +150,14 @@ def likelihood_best(X, y):
     :return: array, shape = (n_features,)
         Absolute likelihood difference vector
     """
-    global pipe
+    pipe = Global.get_pipe()
 
     feat_names = pipe['count'].get_feature_names()
     # Initialize return array to all zeroes
     a1 = np.array([0] * len(feat_names))
 
     count_vec_df = sparse_to_df(X, feat_names)
-    count_vec_df['Actuals'] = y
+    count_vec_df['y'] = y
     cls_names = np.unique(y)
     likelihoods_df = compute_relative_freq_df(count_vec_df, feat_names,
                                               cls_names, 'Actuals')
@@ -155,7 +186,8 @@ def mutual_info_best(X, y):
     :return: array, shape = (n_features,)
         Absolute likelihood difference vector
     """
-    global pipe
+    debug=False
+    pipe = Global.get_pipe()
 
     feat_names = pipe['count'].get_feature_names()
     # Initialize return array to all zeroes
@@ -170,68 +202,71 @@ def mutual_info_best(X, y):
     for y in gs:
         cls_counts[y] = len(gs[y])
 
-    print(count_vec_df)
-
     likelihoods_df = compute_relative_freq_df(count_vec_df, feat_names,
                                               cls_names, 'y', compute_relative_prob=False)
 
     mi = calc_mutual_information(likelihoods_df, feat_names, cls_counts, use_cond_entropy=True)
-    print(f"feature names: {feat_names}")
-    print(f"mutual info: {mi}")
+    if debug:
+        print(f"feature names: {feat_names}")
+        print(f"mutual info: {mi}")
     mi = np.array(mi)
     return mi
 
 
-# Create the pandas DataFrame
-df = pd.DataFrame(weather, columns=['Weather', 'Temperature', 'Humidity', 'Wind', 'Suitable'])
-df_text = df["Weather"] + " " + df["Temperature"] + " " + df["Humidity"] + " " + df["Wind"]
+def test_feature_selection():
+    # Create the pandas DataFrame
+    df = pd.DataFrame(weather, columns=['Weather', 'Temperature', 'Humidity', 'Wind', 'y'])
+    df_text = df["Weather"] + " " + df["Temperature"] + " " + df["Humidity"] + " " + df["Wind"]
 
-X = df_text
-y = df['Suitable']
-k_best = 3
+    X = df_text
+    y = df['y']
+    k_best = 3
 
-display(df)
-# Pipeline, note that alpha is set to zero in MultinomialNB just to validate the likelihood computations
-pipe = Pipeline([('count', CountVectorizer()),
-                 ('countvectorizer_debug', Debug()),
-                 # ('tf_idf', TfidfTransformer(norm=None)),
-                 # ('tf_idf_debug', Debug()),
-                 # ('chi2', SelectKBest(chi2, k=k_best)),
-                 # ('best_likelihoods', SelectKBest(likelihood_best, k=k_best)),
-                 ('best_likelihoods', SelectKBest(mutual_info_best, k=k_best)),
+    display(df)
+    # Pipeline, note that alpha is set to zero in MultinomialNB just to validate the likelihood computations
+    pipe = Pipeline([('count', CountVectorizer()),
+                     ('countvectorizer_debug', Debug()),
+                     # ('tf_idf', TfidfTransformer(norm=None)),
+                     # ('tf_idf_debug', Debug()),
+                     # ('chi2', SelectKBest(chi2, k=k_best)),
+                     # ('best_likelihoods', SelectKBest(likelihood_best, k=k_best)),
+                     ('best_likelihoods', SelectKBest(mutual_info_best, k=k_best)),
 
-                 ('kbest_debug', Debug()),
-                 ('clf', MultinomialNB(alpha=0))])
+                     ('kbest_debug', Debug()),
+                     ('clf', MultinomialNB(alpha=0))])
 
-result = pipe.fit(X, y)
+    Global.set_pipe(pipe)
+    result = pipe.fit(X, y)
 
-feat_names = pipe['count'].get_feature_names()
+    feat_names = pipe['count'].get_feature_names()
 
-print("Count vectorizer debug")
-count_vec_df = sparse_to_df(pipe['countvectorizer_debug'].fit_result, pipe['count'].get_feature_names())
-print(count_vec_df)
+    print("Count vectorizer debug")
+    count_vec_df = sparse_to_df(pipe['countvectorizer_debug'].fit_result, pipe['count'].get_feature_names())
+    print(count_vec_df)
 
-print(f"K={k_best} best features accuracy")
-k_best_feat = [feat_names[i] for i in pipe['best_likelihoods'].get_support(indices=True)]
-print(f"k_best_feat: {k_best_feat}")
-k_best_df = sparse_to_df(pipe['kbest_debug'].fit_result, k_best_feat)
-k_best_df['Suitable actuals'] = y
+    print(f"K={k_best} best features accuracy")
+    k_best_feat = [feat_names[i] for i in pipe['best_likelihoods'].get_support(indices=True)]
+    print(f"k_best_feat: {k_best_feat}")
+    k_best_df = sparse_to_df(pipe['kbest_debug'].fit_result, k_best_feat)
+    k_best_df['Suitable actuals'] = y
 
-y_preds = pipe.predict(X)
+    y_preds = pipe.predict(X)
 
-# Confusion matrix and classification report
-c_m = confusion_matrix(y, y_preds)
-print(c_m)
-print(classification_report(y, y_preds))
+    # Confusion matrix and classification report
+    c_m = confusion_matrix(y, y_preds)
+    print(c_m)
+    print(classification_report(y, y_preds))
 
-k_best_df['Suitable predictions'] = pd.Series(y_preds)
-print(f"K={k_best} best features with predictions")
-print(k_best_df)
+    k_best_df['Suitable predictions'] = pd.Series(y_preds)
+    print(f"K={k_best} best features with predictions")
+    print(k_best_df)
 
-probs = convert_log_prob_to_df_prob(pipe['clf'].feature_log_prob_, pipe['clf'].classes_)
-# Round the columns to account for alpha
-tmp = probs.select_dtypes(include=[np.number])
-probs.loc[:, tmp.columns] = np.round(tmp, 4)
-print(probs)
+    probs = convert_log_prob_to_df_prob(pipe['clf'].feature_log_prob_, pipe['clf'].classes_, k_best_feat)
+    # Round the columns to account for alpha
+    tmp = probs.select_dtypes(include=[np.number])
+    probs.loc[:, tmp.columns] = np.round(tmp, 4)
+    print(probs)
 
-
+debug = False
+if debug:
+    test_feature_selection()
