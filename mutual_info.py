@@ -129,12 +129,18 @@ def calc_mutual_information(full_df, feat_names, class_count_residuals, use_cond
     # Order has to be same as the order of the feat_names passed to this function
     for feature in feat_names:
         # TEMP remove this
-        if feature.startswith('not '):
-            continue
+        # if feature.startswith('not '):
+        #     continue
+
         new_arr = []
         word_df = full_df[full_df['x'] == feature].copy()
         word_df.reset_index(inplace = True, drop = True)
         num_rows = word_df.shape[0]
+
+        if num_rows == 0:
+            print(f"Feature {feature} not found in counts! Assuming zero mutual info")
+            mut_infos.append(0.0)
+            continue
 
         # The case where not all combinations are already specified
         if num_rows != num_class_labels * 2:
