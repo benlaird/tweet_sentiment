@@ -5,7 +5,8 @@ import time
 import pandas as pd
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.model_selection import train_test_split
+from sklearn.feature_selection import SelectKBest
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer, TfidfVectorizer
 from sklearn.naive_bayes import GaussianNB
 from sklearn.naive_bayes import MultinomialNB
@@ -17,6 +18,10 @@ from yellowbrick.classifier import ConfusionMatrix
 
 import spacy
 from spacy.matcher.phrasematcher import PhraseMatcher
+
+from feature_selection import mutual_info_best
+
+from globals import Global
 
 nlp = spacy.load("en_core_web_sm")
 
@@ -138,15 +143,43 @@ def custom_tokenizer(sentence):
     ret = [token.lemma_ for token in tokens if not (token.is_punct | token.is_space | token.is_stop)]
     return ret
 
+def create_pipeline(read_vector_cache, vectorizer_pipe_name, k_best):
 
-def model_naive_bayes(save_vector_cache=False, read_vector_cache=False, debug=False):
+    if read_vector_cache:
+        with open('vectorizer.pickle', 'rb') as f:
+            # The protocol version used is detected automatically, so we do not
+            # have to specify it.
+            vectorizer = pickle.load(f)
+            vect_pipe_tupe = (vectorizer_pipe_name, vectorizer)
+    else:
+        vect_pipe_tupe = (vectorizer_pipe_name, CountVectorizer(analyzer='word',
+                                                                strip_accents='unicode',
+                                                                stop_words='english',
+                                                                lowercase=True,
+                                                                tokenizer=custom_tokenizer,
+                                                                # ngram_range=(1, 2)
+                                                                ))
+
+    pipe = Pipeline([
+        vect_pipe_tupe,
+        # ("tf_idf_debug", Debug()),
+        ('best_mutual_info', SelectKBest(mutual_info_best, k=k_best)),
+        # ('kbest_debug', Debug()),
+        ('clf', MultinomialNB())])
+
+    Global.set_pipe(pipe)
+    return pipe
+
+def model_naive_bayes(k_best=100, save_vector_cache=False, read_vector_cache=False, debug=False, if_debug_max_rows=1000):
     use_counts = False
     ct = ClockTime()
+
+    vectorizer_pipe_name = "count"
 
     # Read all tweet text into docs
     # Docs is an array of text strings
     if debug:
-        docs, dependent_var = all_tweet_text("./data/tweet-sentiment-extraction/train.csv", max_rows=100)
+        docs, dependent_var = all_tweet_text("./data/tweet-sentiment-extraction/train.csv", max_rows=if_debug_max_rows)
     else:
         docs, dependent_var = all_tweet_text("./data/tweet-sentiment-extraction/train.csv")
 
@@ -157,34 +190,13 @@ def model_naive_bayes(save_vector_cache=False, read_vector_cache=False, debug=Fa
     X_train, X_test, y_train, y_test, idx_train, idx_test = train_test_split(X, y, indices, random_state=1,
                                                                              test_size=0.25)
 
-    if read_vector_cache:
-        with open('vectorizer.pickle', 'rb') as f:
-            # The protocol version used is detected automatically, so we do not
-            # have to specify it.
-            vectorizer = pickle.load(f)
-            vect_pipe_tupe = ("tf_idf", vectorizer)
-    else:
-        vect_pipe_tupe = ("tf_idf", TfidfVectorizer(analyzer='word',
-                               strip_accents='unicode',
-                               stop_words='english',
-                               lowercase=True,
-                               tokenizer=custom_tokenizer,
-                               ngram_range=(1, 2)
-                               # token_pattern=r'\b[a-zA-Z]{3,}\b',
-                               # max_df=0.6,
-                               # min_df=0.0
-                               ))
-
-    pipe = Pipeline([
-            vect_pipe_tupe,
-            ("tf_idf_debug", Debug()),
-            ('clf', MultinomialNB())])
+    pipe = create_pipeline(read_vector_cache, vectorizer_pipe_name, k_best)
 
     ct.start("Fitting the training data...")
     result = pipe.fit(X_train, y_train)
     print(f"Fitted the training data in {ct.stop()} seconds")
 
-    vectorizer = pipe['tf_idf']
+    vectorizer = pipe[vectorizer_pipe_name]
     if save_vector_cache:
         with open('vectorizer.pickle', 'wb') as f:
             # Pickle the 'data' dictionary using the highest protocol available.
@@ -231,15 +243,11 @@ def model_naive_bayes(save_vector_cache=False, read_vector_cache=False, debug=Fa
     nb_test_score = accuracy_score(y_test, nb_test_preds)
 
     print("Multinomial Naive Bayes")
+    print(f"*** K-best == {k_best}")
     print("Training Accuracy: {:.4} \t\t Testing Accuracy: {:.4}".format(nb_train_score, nb_test_score))
     print("")
     print('-' * 70)
     print("")
-
-    # Confusion matrix and classification report
-    c_m = confusion_matrix(y_test, nb_test_preds)
-    print(c_m)
-    print(classification_report(y_test, nb_test_preds))
 
     print("*** Top mean positive features ***")
     top_mean_f = top_mean_feats(dtm_tfidf_train, feature_names, grp_ids=positive_train_offset)
@@ -248,6 +256,11 @@ def model_naive_bayes(save_vector_cache=False, read_vector_cache=False, debug=Fa
     print("*** Top mean negative features ***")
     top_mean_f = top_mean_feats(dtm_tfidf_train, feature_names, grp_ids=negative_train_offset)
     print(top_mean_f)
+
+    # Confusion matrix and classification report
+    c_m = confusion_matrix(y_test, nb_test_preds)
+    print(c_m)
+    print(classification_report(y_test, nb_test_preds))
 
     if False:
         gnb = pipe['clf']
@@ -261,10 +274,32 @@ def model_naive_bayes(save_vector_cache=False, read_vector_cache=False, debug=Fa
         visualizer.score(dtm_tfidf_test, y_test)  # Evaluate the model on the test data
         visualizer.show()  # Finalize and show the figure
 
+def cross_validate(k_best=100, read_vector_cache=False, debug=False, if_debug_max_rows=1000):
+    vectorizer_pipe_name = "count"
+
+    # Read all tweet text into docs
+    # Docs is an array of text strings
+    if debug:
+        docs, dependent_var = all_tweet_text("./data/tweet-sentiment-extraction/train.csv", max_rows=if_debug_max_rows)
+    else:
+        docs, dependent_var = all_tweet_text("./data/tweet-sentiment-extraction/train.csv")
+
+    X = docs
+    y = dependent_var
+
+    indices = range(0, len(X))
+    pipe = create_pipeline(read_vector_cache, vectorizer_pipe_name, k_best)
+    cv =  StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
+    scores = cross_val_score(pipe, X, y, cv=cv, scoring="f1_micro", n_jobs = 3)
+    mean_score = scores.mean()
+    print(f"Scores: {scores}")
+    print(f"Mean f1-micro score: {mean_score}")
+
 def main():
     # model_naive_bayes(save_vector_cache=True)
 
-    # model_naive_bayes(debug=True)
-    model_naive_bayes(read_vector_cache=True)
+    # model_naive_bayes(debug=True, if_debug_max_rows=5000)
+    # model_naive_bayes(k_best=100)
+    cross_validate(k_best=100)
 
 main()
