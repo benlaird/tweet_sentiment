@@ -70,6 +70,13 @@ def calc_mutual_information_using_joint_entropy(df, hx, hy):
 
 
 def calc_mutual_information_using_cond_entropy(df, px, py):
+    """
+
+    :param df: data frame
+    :param px: dictionary of marginal probabilities for x
+    :param py: dictionary of marginal probabilities for y
+    :return: mutual information
+    """
     hy = calc_entropy(py)
     h = calc_conditional_entropy_over_all_x(df, px)
     mi = hy - h
