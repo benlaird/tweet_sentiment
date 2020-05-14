@@ -289,8 +289,22 @@ def cross_validate(k_best=100, read_vector_cache=False, debug=False, if_debug_ma
 
     indices = range(0, len(X))
     pipe = create_pipeline(read_vector_cache, vectorizer_pipe_name, k_best)
+    vect_pipe_tupe = (vectorizer_pipe_name, CountVectorizer(analyzer='word',
+                                           strip_accents='unicode',
+                                           stop_words='english',
+                                           lowercase=True,
+                                           tokenizer=custom_tokenizer,
+                                           # ngram_range=(1, 2)
+                                           ))
+    pipe = Pipeline([
+        vect_pipe_tupe,
+        # ("tf_idf_debug", Debug()),
+        # ('best_mutual_info', SelectKBest(mutual_info_best, k=k_best)),
+        # ('kbest_debug', Debug()),
+        ('clf', MultinomialNB())])
+
     cv =  StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
-    scores = cross_val_score(pipe, X, y, cv=cv, scoring="f1_micro", n_jobs = 3)
+    scores = cross_val_score(pipe, X, y, cv=cv, scoring="f1_micro", n_jobs = 1)
     mean_score = scores.mean()
     print(f"Scores: {scores}")
     print(f"Mean f1-micro score: {mean_score}")
