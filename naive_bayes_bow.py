@@ -162,9 +162,9 @@ def create_pipeline(read_vector_cache, vectorizer_pipe_name, k_best):
 
     pipe = Pipeline([
         vect_pipe_tupe,
-        # ("tf_idf_debug", Debug()),
+        ("tf_idf_debug", Debug()),
         ('best_mutual_info', SelectKBest(mutual_info_best, k=k_best)),
-        # ('kbest_debug', Debug()),
+        ('kbest_debug', Debug()),
         ('clf', MultinomialNB())])
 
     Global.set_pipe(pipe)
@@ -313,7 +313,8 @@ def main():
     # model_naive_bayes(save_vector_cache=True)
 
     # model_naive_bayes(debug=True, if_debug_max_rows=5000)
-    # model_naive_bayes(k_best=100)
-    cross_validate(k_best=100)
+    # cross_validate(k_best=100)
 
+    # model_naive_bayes(debug=True, if_debug_max_rows=10000, k_best=10)
+    model_naive_bayes(k_best=150)
 main()
