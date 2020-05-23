@@ -1,7 +1,8 @@
 import pandas as pd
 from pytest import approx
 
-from mutual_info import calc_mutual_information, calc_conditional_entropy_x, calc_mutual_information_for_word
+from mutual_info import calc_mutual_information, calc_conditional_entropy_x, calc_mutual_information_for_word, \
+    conditional_probability_for_y_given_partial_jpd
 
 # MI expected: 0.2141709
 data1 = [
@@ -92,3 +93,18 @@ def test_mutual_information():
     mi_ce = calc_mutual_information(df, ['paint'], data3b_class_counts, use_cond_entropy=True)
     print(f"Mutual info: {mi_ce}")
     assert mi_ce[0] == approx(test_result[0], rel=1e-5)
+
+
+def test_conditional_probability_for_y_given_partial_jpd():
+    data = [
+    ['preverbal', 'pronoun', 224],
+    ['preverbal', 'not pronoun', 655],
+    ['postverbal', 'pronoun', 14],
+    ['postverbal', 'not pronoun', 107]
+    ]
+    test_result = [ 0.115702]
+    df = pd.DataFrame(data, columns=['x', 'y', 'prob'])
+
+    prob_y_given_x = conditional_probability_for_y_given_partial_jpd(df, ["postverbal"])
+    print(prob_y_given_x)
+    assert prob_y_given_x['postverbal']['pronoun'] == approx(test_result[0], rel=1e-5)
