@@ -1,3 +1,5 @@
+import json
+
 from IPython.display import display, HTML
 from sklearn.feature_extraction.text import TfidfTransformer
 from sklearn.feature_extraction.text import CountVectorizer
@@ -11,7 +13,7 @@ from sklearn.pipeline import Pipeline
 import numpy as np
 import pandas as pd
 
-from mutual_info import calc_mutual_information
+from mutual_info import calc_mutual_information,  conditional_probability_for_y_given_partial_jpd
 
 from globals import Global
 
@@ -186,7 +188,7 @@ def mutual_info_best(X, y):
     :return: array, shape = (n_features,)
         Absolute likelihood difference vector
     """
-    debug=False
+    debug=True
     pipe = Global.get_pipe()
 
     feat_names = pipe['count'].get_feature_names()
@@ -201,14 +203,31 @@ def mutual_info_best(X, y):
     gs = count_vec_df.groupby('y').groups
     for y in gs:
         cls_counts[y] = len(gs[y])
+    print(f"Class count residuals: {cls_counts}")
 
     likelihoods_df = compute_relative_freq_df(count_vec_df, feat_names,
                                               cls_names, 'y', compute_relative_prob=False)
 
     mi = calc_mutual_information(likelihoods_df, feat_names, cls_counts, use_cond_entropy=True)
     if debug:
+        topN = 150
         print(f"feature names: {feat_names}")
         print(f"mutual info: {mi}")
+        # Make a data frame from the feature names & their mutual info
+        s1 = pd.Series(feat_names, name='features')
+        s2 = pd.Series(mi,  name='mi')
+        f_df = pd.concat([s1, s2], axis=1)
+        f_df.set_index('features', inplace=True)
+        f_df = f_df.sort_values(by=['mi'], ascending=False)
+        print(f_df)
+        f_df.head(topN).to_csv("mi_feats.tsv", sep='\t')
+
+        topn_feat_names = list(f_df.index[:topN])
+        cond_probs = conditional_probability_for_y_given_partial_jpd(likelihoods_df, topn_feat_names)
+        with open('cond_probs.json', 'w') as fp:
+            json.dump(cond_probs, fp, indent=4)
+
+        print(f"cond_probs: {cond_probs}")
     mi = np.array(mi)
     return mi
 
