@@ -315,6 +315,6 @@ def main():
     # model_naive_bayes(debug=True, if_debug_max_rows=5000)
     # cross_validate(k_best=100)
 
-    # model_naive_bayes(debug=True, if_debug_max_rows=10000, k_best=10)
+    # model_naive_bayes(debug=True, if_debug_max_rows=1000, k_best=10)
     model_naive_bayes(k_best=150)
 main()
