@@ -36,6 +36,9 @@ class SentimentDispersion:
 
 
 def bar_plot(df, sentiment):
+    debug = True
+    print(tabulate(df, headers='keys', tablefmt='psql'))
+
     color_palette_list = px.colors.diverging.Armyrose
 
     if sentiment == 'positive':
