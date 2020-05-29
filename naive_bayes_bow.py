@@ -13,6 +13,7 @@ from sklearn.naive_bayes import MultinomialNB
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 from sklearn.pipeline import Pipeline
 
+
 from yellowbrick.classifier import classification_report as yb_class_report, ClassificationReport
 from yellowbrick.classifier import ConfusionMatrix
 
@@ -23,8 +24,7 @@ from feature_selection import mutual_info_best
 
 from globals import Global
 
-nlp = spacy.load("en_core_web_sm")
-
+nlp = None
 
 class Debug(TransformerMixin, BaseEstimator):
     """
@@ -309,12 +309,32 @@ def cross_validate(k_best=100, read_vector_cache=False, debug=False, if_debug_ma
     print(f"Scores: {scores}")
     print(f"Mean f1-micro score: {mean_score}")
 
+
 def main():
+    global nlp
+    nlp = spacy.load("en_core_web_sm")
+
+    slang_typo_normalization = {
+        "cos": "because",
+        "fav": "favorite",
+        'awsome': 'awesome',
+        'thanx': 'thanks',
+        'luv': 'love',
+        'mom' : 'mother',
+        'mommy' : 'mother',
+        'congrats' : 'congratulations',
+        'congrat' : 'congratulation'
+    }
+
+    # Add special cases for slang & typos
+    for k in slang_typo_normalization:
+        nlp.tokenizer.add_special_case(k, [{'ORTH': slang_typo_normalization[k]}])
+
     # model_naive_bayes(save_vector_cache=True)
 
     # model_naive_bayes(debug=True, if_debug_max_rows=5000)
     # cross_validate(k_best=100)
 
-    # model_naive_bayes(debug=True, if_debug_max_rows=1000, k_best=10)
-    model_naive_bayes(k_best=150)
+    model_naive_bayes(debug=True, if_debug_max_rows=1000, k_best=10)
+    # model_naive_bayes(k_best=150)
 main()
