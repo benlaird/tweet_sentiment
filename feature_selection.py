@@ -12,6 +12,7 @@ from sklearn.feature_selection import chi2
 from sklearn.pipeline import Pipeline
 import numpy as np
 import pandas as pd
+from tabulate import tabulate
 
 from mutual_info import calc_mutual_information,  conditional_probability_for_y_given_partial_jpd
 
@@ -209,25 +210,30 @@ def mutual_info_best(X, y):
                                               cls_names, 'y', compute_relative_prob=False)
 
     mi = calc_mutual_information(likelihoods_df, feat_names, cls_counts, use_cond_entropy=True)
+
+    topN = 150
+    # Make a data frame from the feature names & their mutual info
+    s1 = pd.Series(feat_names, name='features')
+    s2 = pd.Series(mi,  name='mi')
+    f_df = pd.concat([s1, s2], axis=1)
+    f_df.set_index('features', inplace=True)
+    f_df = f_df.sort_values(by=['mi'], ascending=False)
+
+    f_top_df = f_df.head(topN)
+
+    f_top_df.to_csv("mi_feats.tsv", sep='\t')
+
+    topn_feat_names = list(f_top_df.index)
+    cond_probs = conditional_probability_for_y_given_partial_jpd(likelihoods_df, topn_feat_names)
+    with open('cond_probs.json', 'w') as fp:
+        json.dump(cond_probs, fp, indent=4)
+
     if debug:
-        topN = 150
         print(f"feature names: {feat_names}")
         print(f"mutual info: {mi}")
-        # Make a data frame from the feature names & their mutual info
-        s1 = pd.Series(feat_names, name='features')
-        s2 = pd.Series(mi,  name='mi')
-        f_df = pd.concat([s1, s2], axis=1)
-        f_df.set_index('features', inplace=True)
-        f_df = f_df.sort_values(by=['mi'], ascending=False)
-        print(f_df)
-        f_df.head(topN).to_csv("mi_feats.tsv", sep='\t')
-
-        topn_feat_names = list(f_df.index[:topN])
-        cond_probs = conditional_probability_for_y_given_partial_jpd(likelihoods_df, topn_feat_names)
-        with open('cond_probs.json', 'w') as fp:
-            json.dump(cond_probs, fp, indent=4)
-
+        print(tabulate(f_top_df, headers='keys', tablefmt='psql'))
         print(f"cond_probs: {cond_probs}")
+
     mi = np.array(mi)
     return mi
 
