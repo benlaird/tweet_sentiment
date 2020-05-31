@@ -1,3 +1,6 @@
+# naive_bayes_bow.py
+
+import os
 import pickle
 import re
 import time
@@ -20,10 +23,12 @@ from yellowbrick.classifier import ConfusionMatrix
 import spacy
 from spacy.matcher.phrasematcher import PhraseMatcher
 
-from feature_selection import mutual_info_best
+if not os.environ.get('KAGGLE_KERNEL_RUN_TYPE', None):
+    from analyze_cond_probs import read_cond_probs
+    from feature_selection import mutual_info_best
+    from globals import Global
 
-from globals import Global
-
+Global()
 nlp = None
 
 class Debug(TransformerMixin, BaseEstimator):
@@ -115,20 +120,22 @@ def count_zero_categories(X_2_3_4_docs):
     return dtm_tfidf_zero_cat
 
 
-def all_tweet_text(csv_file, max_rows=-1):
+def all_tweet_text(csv_file, max_rows=None):
     # keep_default_na=False means empty strings are kept as is, i.e. as ''
     df = pd.read_csv(csv_file, keep_default_na=False)
     # Replace any empty text with empty string instead of np.nan
     # df['text'] = df['text'].replace(np.nan, '', regex=True)
     tweet_text = df['text'].tolist()
     sentiment = df['sentiment'].tolist()
+    textID = df['textID'].tolist()
 
-    if max_rows > 0:
+    if max_rows:
         tweet_text = tweet_text[0:max_rows]
         sentiment = sentiment[0:max_rows]
+        textID  = textID[0:max_rows]
     # new_list = ['+' if int(el)>10 else '-' for el in li]
     # return tweet_text[310:316], sentiment[310:316]
-    return tweet_text, sentiment
+    return tweet_text, sentiment, textID
 
 
 def sentiment_matches(idx, y, sentiment):
@@ -142,6 +149,32 @@ def custom_tokenizer(sentence):
     tokens = nlp(sentence)
     ret = [token.lemma_ for token in tokens if not (token.is_punct | token.is_space | token.is_stop)]
     return ret
+
+
+def top_feature_in_sentence(sentence, feat_cond_probs):
+    tokens = nlp(sentence)
+
+    d = {}
+    # Make a dictionary of all the tokens with the value as the original text
+    i = 0
+    for i in range(0, len(tokens)):
+        token = tokens[i]
+        if not (token.is_punct | token.is_space | token.is_stop):
+            d[token.lemma_] = (i, token)
+
+    ret_str = ""
+    for feature in feat_cond_probs:
+        if feature in d:
+            i, token = d[feature]
+            res_str = token.text
+            if i+1 < len(tokens) and tokens[i+1].is_punct:
+                res_str = res_str + tokens[i+1].text
+            return res_str
+
+    print(f"No feature found for {sentence}")
+    return None
+
+
 
 def create_pipeline(read_vector_cache, vectorizer_pipe_name, k_best):
 
@@ -170,25 +203,44 @@ def create_pipeline(read_vector_cache, vectorizer_pipe_name, k_best):
     Global.set_pipe(pipe)
     return pipe
 
-def model_naive_bayes(k_best=100, save_vector_cache=False, read_vector_cache=False, debug=False, if_debug_max_rows=1000):
+def split_data(debug_max_rows=None, real_test=False):
+    """
+
+    :param real_test: if true load the test file as the test data
+    :return:  X_train, X_test, y_train, y_test, idx_train, idx_test, textID_test
+    """
+    # If not a real test split the training data into train test portions
+    if not real_test:
+
+        # Read all tweet text into docs
+        # Docs is an array of text strings
+
+        docs, dependent_var, train_textID = all_tweet_text(Global.input_dir + "train.csv", max_rows=debug_max_rows)
+
+        X = docs
+        y = dependent_var
+
+        indices = range(0, len(X))
+        X_train, X_test, y_train, y_test, idx_train, idx_test = train_test_split(X, y, indices, random_state=1,
+                                                                                 test_size=0.25)
+    else:
+        X_train, y_train, train_textID = all_tweet_text(Global.input_dir + "train.csv", max_rows=debug_max_rows)
+        idx_train = range(0, len(X_train))
+
+        X_test, y_test, test_textID = all_tweet_text(Global.input_dir + "test.csv", max_rows=debug_max_rows)
+        idx_test = range(0, len(X_test))
+
+    return X_train, X_test, y_train, y_test, idx_train, idx_test, test_textID
+
+
+
+def model_naive_bayes(k_best=100, real_test=False, save_vector_cache=False, read_vector_cache=False, debug_max_rows=None):
     use_counts = False
     ct = ClockTime()
 
     vectorizer_pipe_name = "count"
 
-    # Read all tweet text into docs
-    # Docs is an array of text strings
-    if debug:
-        docs, dependent_var = all_tweet_text("./data/tweet-sentiment-extraction/train.csv", max_rows=if_debug_max_rows)
-    else:
-        docs, dependent_var = all_tweet_text("./data/tweet-sentiment-extraction/train.csv")
-
-    X = docs
-    y = dependent_var
-
-    indices = range(0, len(X))
-    X_train, X_test, y_train, y_test, idx_train, idx_test = train_test_split(X, y, indices, random_state=1,
-                                                                             test_size=0.25)
+    X_train, X_test, y_train, y_test, idx_train, idx_test, test_textID = split_data(debug_max_rows, real_test)
 
     pipe = create_pipeline(read_vector_cache, vectorizer_pipe_name, k_best)
 
@@ -207,14 +259,14 @@ def model_naive_bayes(k_best=100, save_vector_cache=False, read_vector_cache=Fal
     dtm_tfidf_train = pipe['tf_idf_debug'].fit_result
 
     # Return the idx's of the positive sentiments
-    positive_train = list(filter(lambda idx: sentiment_matches(idx, y, 'positive'), idx_train))
+    positive_train = list(filter(lambda idx: sentiment_matches(idx, y_train, 'positive'), idx_train))
     positive_train_offset = []
     for i in range(0, dtm_tfidf_train.get_shape()[0]):
         if idx_train[i] in positive_train:
             positive_train_offset.append(i)
 
     # Return the idx's of the negative sentiments
-    negative_train = list(filter(lambda idx: sentiment_matches(idx, y, 'negative'), idx_train))
+    negative_train = list(filter(lambda idx: sentiment_matches(idx, y_train, 'negative'), idx_train))
     negative_train_offset = []
     for i in range(0, dtm_tfidf_train.get_shape()[0]):
         if idx_train[i] in negative_train:
@@ -249,18 +301,43 @@ def model_naive_bayes(k_best=100, save_vector_cache=False, read_vector_cache=Fal
     print('-' * 70)
     print("")
 
-    print("*** Top mean positive features ***")
-    top_mean_f = top_mean_feats(dtm_tfidf_train, feature_names, grp_ids=positive_train_offset)
-    print(top_mean_f)
-
-    print("*** Top mean negative features ***")
-    top_mean_f = top_mean_feats(dtm_tfidf_train, feature_names, grp_ids=negative_train_offset)
-    print(top_mean_f)
+    """    print("*** Top mean positive features ***")
+        top_mean_f = top_mean_feats(dtm_tfidf_train, feature_names, grp_ids=positive_train_offset)
+        print(top_mean_f)
+    
+        print("*** Top mean negative features ***")
+        top_mean_f = top_mean_feats(dtm_tfidf_train, feature_names, grp_ids=negative_train_offset)
+        print(top_mean_f)"""
 
     # Confusion matrix and classification report
     c_m = confusion_matrix(y_test, nb_test_preds)
     print(c_m)
     print(classification_report(y_test, nb_test_preds))
+
+    cond_probs_file_name = "cond_probs.json"
+    feat_cond_probs = read_cond_probs(cond_probs_file_name)
+    # print(cond_probs)
+
+    i = 0
+    selected_text = []
+    for i in range(0, len(X_test)):
+        sentence = X_test[i]
+        textID = test_textID[i]
+        if y_test[i] == 'neutral':
+            top_feat = None
+        else:
+            top_feat = top_feature_in_sentence(sentence, feat_cond_probs)
+        if top_feat:
+            selected_text.append(top_feat)
+        else:
+            selected_text.append(sentence)
+        print(f"textID: {textID} Sentence: {sentence} top_feat: {top_feat}")
+
+    data = {'textID' : test_textID, 'selected_text' : selected_text}
+    submission_df = pd.DataFrame(data)
+    submission_df.set_index('textID', inplace=True)
+    submission_df.to_csv("submission.csv", sep=',')
+
 
     if False:
         gnb = pipe['clf']
@@ -332,9 +409,9 @@ def main():
 
     # model_naive_bayes(save_vector_cache=True)
 
-    # model_naive_bayes(debug=True, if_debug_max_rows=5000)
+    # model_naive_bayes(debug_max_rows=5000)
     # cross_validate(k_best=100)
 
-    model_naive_bayes(debug=True, if_debug_max_rows=1000, k_best=10)
+    model_naive_bayes(real_test=True, debug_max_rows=1000, k_best=10)
     # model_naive_bayes(k_best=150)
 main()
