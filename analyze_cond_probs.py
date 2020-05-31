@@ -1,5 +1,8 @@
+# analyze_cond_probs.py
+
 import json
 import operator
+import os
 from statistics import pstdev, mean
 import pandas as pd
 import numpy as np
@@ -7,6 +10,8 @@ from tabulate import tabulate
 import plotly.express as px
 import plotly.graph_objects as go
 
+if not os.environ.get('KAGGLE_KERNEL_RUN_TYPE', None):
+    from globals import Global
 
 class SentimentDispersion:
     def __init__(self, feature, sentiment, prob):
@@ -114,7 +119,7 @@ def scatter_plot(df):
 
 
 def read_cond_probs(filename):
-    with open(filename, "r") as read_file:
+    with open(Global.output_dir + filename, "r") as read_file:
         data = json.load(read_file)
     return data
 
@@ -180,4 +185,4 @@ def main():
     for sentiment in ('positive', 'neutral', 'negative'):
         bar_plot(df[df['sentiment']==sentiment], sentiment)
 
-main()
+# main()
