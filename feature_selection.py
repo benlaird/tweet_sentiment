@@ -1,4 +1,7 @@
+# feature_selection.py
+
 import json
+import os
 
 from IPython.display import display, HTML
 from sklearn.feature_extraction.text import TfidfTransformer
@@ -14,9 +17,10 @@ import numpy as np
 import pandas as pd
 from tabulate import tabulate
 
-from mutual_info import calc_mutual_information,  conditional_probability_for_y_given_partial_jpd
 
-from globals import Global
+if not os.environ.get('KAGGLE_KERNEL_RUN_TYPE', None):
+    from globals import Global
+    from mutual_info import calc_mutual_information,  conditional_probability_for_y_given_partial_jpd
 
 class Debug(TransformerMixin, BaseEstimator):
     """
